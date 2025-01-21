@@ -11,14 +11,18 @@ class ReactiveNode {
   ctxDeps = new Set<ReactiveNode>();
 
   subscribe(sub: ReactiveNode): void {
-    this.subs.add(new WeakRef(sub));
+    const included = [...this.subs].some((ref) => Object.is(ref.deref(), sub));
+    if (!included) {
+      this.subs.add(new WeakRef(sub));
+    }
   }
 
   unsubscribe(sub: ReactiveNode): void {
-    const ref = [...this.subs].find((ref) => Object.is(ref.deref(), sub));
-    if (ref) {
-      this.subs.delete(ref);
-    }
+    this.subs.forEach((ref) => {
+      if (Object.is(sub, ref.deref())) {
+        this.subs.delete(ref);
+      }
+    });
   }
 
   markAsDisty(): void {
@@ -113,6 +117,7 @@ class ComputedNode<T> extends ReactiveNode {
 
 class EffectNode extends ReactiveNode {
   taskScheduled = false;
+  destroyed = false;
 
   constructor(public effectFn: () => void) {
     super();
@@ -121,7 +126,7 @@ class EffectNode extends ReactiveNode {
   }
 
   override markAsDisty(): void {
-    if (this.taskScheduled) {
+    if (this.taskScheduled || this.destroyed) {
       return;
     }
 
@@ -156,6 +161,12 @@ class EffectNode extends ReactiveNode {
 
     return value;
   }
+
+  destroy(): void {
+    this.deps.forEach((dep) => dep.unsubscribe(this));
+    this.deps.clear();
+    this.destroyed = true;
+  }
 }
 
 export function Signal<T>(
@@ -176,6 +187,24 @@ export function Computed<T>(conputationFn: () => T) {
   return computedFn;
 }
 
+const EFFECTS = Symbol("EFFECTS");
+
+declare const window: Window & {
+  [key in typeof EFFECTS]: Set<EffectNode> | undefined;
+};
+
 export function Effect(effectFn: () => void) {
-  new EffectNode(effectFn);
+  let node: EffectNode | null = new EffectNode(effectFn);
+  window[EFFECTS] ??= new Set();
+  window[EFFECTS].add(node);
+
+  return {
+    destroy: () => {
+      if (node) {
+        window[EFFECTS]?.delete(node);
+        node?.destroy();
+        node = null;
+      }
+    },
+  };
 }

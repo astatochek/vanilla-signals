@@ -5,5 +5,6 @@ export function setupCounter(element: HTMLButtonElement) {
   Effect(() => {
     element.textContent = `count is ${counter()}`;
   });
+
   element.addEventListener("mousedown", () => counter.set(counter() + 1));
 }
